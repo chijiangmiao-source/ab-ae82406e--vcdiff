@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VCDIFF 增量标定片校验台</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel2: #1c232d; --line: #2b333f;
+    --fg: #d7dde5; --dim: #8b97a7; --accent: #58a6ff; --ok: #3fb950;
+    --bad: #f85149; --warn: #d29922; --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 18px 28px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--dim); font-size: 13px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 22px 28px 60px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+  fieldset { background: var(--panel); border: 1px solid var(--line);
+             border-radius: 8px; margin: 0 0 16px; padding: 12px 14px; }
+  legend { padding: 0 6px; color: var(--accent); font-size: 13px; }
+  textarea { width: 100%; min-height: 150px; resize: vertical;
+             background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+             border-radius: 6px; padding: 10px; font-family: var(--mono);
+             font-size: 12.5px; line-height: 1.5; }
+  textarea:focus { outline: 1px solid var(--accent); }
+  .meta { display: flex; justify-content: space-between; color: var(--dim);
+          font-size: 12px; margin-top: 6px; font-family: var(--mono); }
+  .bar { display: flex; gap: 10px; align-items: center; margin: 4px 0 18px; flex-wrap: wrap; }
+  button { border: 1px solid var(--line); background: var(--panel2); color: var(--fg);
+           border-radius: 6px; padding: 8px 18px; font-size: 14px; cursor: pointer; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.primary:disabled { opacity: .55; cursor: wait; }
+  button:hover { border-color: var(--accent); }
+  button.primary:hover { background: #388bfd; }
+  .hint { color: var(--dim); font-size: 12.5px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+          padding: 14px 16px; margin-bottom: 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 14px; color: var(--accent); }
+  .summary { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 10px; }
+  .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px;
+          padding: 10px 12px; }
+  .stat .k { color: var(--dim); font-size: 12px; }
+  .stat .v { font-family: var(--mono); font-size: 14px; margin-top: 4px; word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono);
+          font-size: 12.5px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 7px 8px; text-align: left;
+           vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  .tag { display: inline-block; border-radius: 4px; padding: 1px 7px; font-size: 11.5px; }
+  .tag.add { background: #143055; color: #79c0ff; }
+  .tag.run { background: #302a14; color: #e3b341; }
+  .tag.copy { background: #16361f; color: #7ee787; }
+  .tag.src  { background: #1c2c40; color: #79c0ff; }
+  .tag.tgt  { background: #3a1d2e; color: #ff9bce; }
+  .hex { color: var(--dim); word-break: break-all; max-width: 520px;
+         display: inline-block; white-space: pre-wrap; }
+  .ok-title { color: var(--ok); }
+  .err-title { color: var(--bad); }
+  .error-box { border-color: var(--bad); }
+  .error-box code { font-family: var(--mono); color: #ffb3ad; }
+  .offset-pill { display: inline-block; background: #3d1714; color: #ffb3ad;
+                 border-radius: 4px; padding: 1px 8px; font-family: var(--mono); }
+  .hidden { display: none; }
+  details summary { cursor: pointer; color: var(--dim); font-size: 12.5px; }
+  .mono { font-family: var(--mono); }
+  .scroll { max-height: 460px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; }
+  .overlap-yes { color: var(--warn); }
+</style>
+</head>
+<body>
+<header>
+  <h1>VCDIFF 增量标定片校验台</h1>
+  <span class="sub">RFC 3284 · 仅默认码表 · 禁用二次压缩 · 至多 8 个窗口 · 输出上限 512 KiB</span>
+</header>
+<main>
+  <div class="grid">
+    <fieldset>
+      <legend>Base64 VCDIFF 载荷（≤ 128 KiB）</legend>
+      <textarea id="delta" spellcheck="false" placeholder="粘贴以 D6 C3 C4 开头的 VCDIFF 流的 Base64 …"></textarea>
+      <div class="meta"><span id="deltaCount">0 / 131072 B</span><span id="deltaBin"></span></div>
+    </fieldset>
+    <fieldset>
+      <legend>Base64 基准字典（≤ 64 KiB，可留空）</legend>
+      <textarea id="dict" spellcheck="false" placeholder="粘贴 SOURCE 窗口引用的基准字典 Base64 …"></textarea>
+      <div class="meta"><span id="dictCount">0 / 65536 B</span><span id="dictBin"></span></div>
+    </fieldset>
+  </div>
+
+  <div class="bar">
+    <button class="primary" id="submitBtn">提交解码</button>
+    <button id="clearBtn">清空输入与结论</button>
+    <span class="hint">提交后经 <span class="mono">POST /api/decode</span> 真实接口校验；失败时定位首个原始字节偏移，且不保留部分输出。</span>
+  </div>
+
+  <section id="result"></section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const deltaEl = $("delta"), dictEl = $("dict");
+
+function updateCounters() {
+  const db = new Blob([deltaEl.value]).size;
+  $("deltaCount").textContent = db.toLocaleString() + " / 131,072 B";
+  $("deltaBin").textContent = db > 131072 ? "超出粘贴上限" : "";
+  $("deltaBin").style.color = db > 131072 ? "var(--bad)" : "";
+  const mb = new Blob([dictEl.value]).size;
+  $("dictCount").textContent = mb.toLocaleString() + " / 65,536 B";
+  $("dictBin").textContent = mb > 65536 ? "超出粘贴上限" : "";
+  $("dictBin").style.color = mb > 65536 ? "var(--bad)" : "";
+}
+deltaEl.addEventListener("input", updateCounters);
+dictEl.addEventListener("input", updateCounters);
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function el(tag, cls, html) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+}
+
+function renderError(payload) {
+  const card = el("div", "card error-box");
+  const win = (payload.window !== undefined && payload.window >= 0)
+    ? "，窗口 #" + payload.window : "";
+  card.appendChild(el("h2", "err-title", "✗ 解码被拒绝"));
+  card.appendChild(el("p", "", "<code>" + esc(payload.error || "未知错误") + "</code>"));
+  card.appendChild(el("p", "", '首个原始偏移 <span class="offset-pill">' +
+    (payload.raw_offset !== undefined ? payload.raw_offset : "—") +
+    "</span>" + win + "；未生成任何部分输出。"));
+  return card;
+}
+
+function rangeText(r) {
+  return "[" + r[0] + ", " + r[1] + ") （" + (r[1]-r[0]) + " B）";
+}
+
+function renderWindows(windows) {
+  const card = el("div", "card");
+  card.appendChild(el("h2", "", "窗口源区间（共 " + windows.length + " 个）"));
+  const wrap = el("div", "scroll");
+  const t = el("table");
+  t.innerHTML = "<thead><tr><th>#</th><th>源</th><th>源段区间</th><th>目标区间</th>" +
+                "<th>目标长度</th><th>原始字节区间</th></tr></thead>";
+  const tb = el("tbody");
+  for (const w of windows) {
+    const tr = el("tr");
+    let srcCell = "<span class='dim'>无（窗口自洽）</span>";
+    if (w.source) {
+      const kind = w.source.kind === "SOURCE"
+        ? "<span class='tag src'>SOURCE</span>"
+        : "<span class='tag tgt'>TARGET</span>";
+      srcCell = kind + " <span class='dim'>段 " + w.source.segment_size +
+        " B @ 位置 " + w.source.segment_position + "</span>";
+    }
+    tr.innerHTML = "<td>" + w.index + "</td><td>" + srcCell +
+      "</td><td class='mono'>" +
+      (w.source ? rangeText(w.source.absolute_range) : "—") +
+      "</td><td class='mono'>" + rangeText(w.target_range) +
+      "</td><td class='mono'>" + w.target_window_length +
+      " B</td><td class='mono'>" + rangeText(w.raw_window_range) + "</td>";
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb); wrap.appendChild(t); card.appendChild(wrap);
+  return card;
+}
+
+function instrRow(i) {
+  const tr = el("tr");
+  let detail = "", kind = "";
+  if (i.kind === "ADD") {
+    kind = "<span class='tag add'>ADD</span>";
+    detail = "<span class='hex'>" + esc(i.data_hex || "") + "</span>";
+  } else if (i.kind === "RUN") {
+    kind = "<span class='tag run'>RUN</span>";
+    detail = "重复字节 <span class='mono'>0x" + esc(i.byte_hex) + "</span> × " + i.size;
+  } else {
+    kind = "<span class='tag copy'>COPY</span>";
+    const srctag = i.source === "SOURCE"
+      ? "<span class='tag src'>SOURCE</span>" : "<span class='tag tgt'>TARGET</span>";
+    const originMap = {DICTIONARY: "字典", PRIOR_TARGET: "前序窗口目标", CURRENT_TARGET: "当前窗口目标"};
+    const originTag = i.origin
+      ? "<span class='tag " + (i.origin === "DICTIONARY" ? "src" : "tgt") +
+        "'>" + esc(originMap[i.origin] || i.origin) + "</span> " : "";
+    detail = "模式 <b>" + esc(i.mode) + "</b> · 编码地址 " + i.encoded_address +
+      " → U[" + i.u_offset + "] · 目标偏移 " + i.target_offset + " · " + srctag +
+      " " + originTag +
+      (i.overlap ? " <span class='overlap-yes'>↻ 前向重叠</span>" : "") +
+      '<details><summary>拷贝字节</summary><span class="hex">' + esc(i.data_hex) + "</span></details>";
+  }
+  tr.innerHTML = "<td>" + i.order + "</td><td>#" + i.window + "</td><td>" + kind +
+    "</td><td class='mono'>" + i.size + "</td><td>" + detail + "</td>";
+  return tr;
+}
+
+function renderInstructions(list) {
+  const card = el("div", "card");
+  card.appendChild(el("h2", "", "指令证据（按指令顺序，共 " + list.length + " 条）"));
+  const wrap = el("div", "scroll");
+  const t = el("table");
+  t.innerHTML = "<thead><tr><th>序号</th><th>窗口</th><th>指令</th><th>长度</th><th>证据</th></tr></thead>";
+  const tb = el("tbody");
+  for (const i of list) tb.appendChild(instrRow(i));
+  t.appendChild(tb); wrap.appendChild(t); card.appendChild(wrap);
+  return card;
+}
+
+function renderOk(p) {
+  const frag = document.createDocumentFragment();
+  const card = el("div", "card");
+  card.appendChild(el("h2", "ok-title", "✓ 解码成功"));
+  const s = el("div", "summary");
+  const stat = (k, v) => {
+    const d = el("div", "stat");
+    d.appendChild(el("div", "k", k));
+    d.appendChild(el("div", "v", v));
+    return d;
+  };
+  s.appendChild(stat("最终字节长度", p.target_length + " B"));
+  s.appendChild(stat("SHA-256", p.sha256));
+  s.appendChild(stat("窗口数", p.window_count + " / " + p.window_limit));
+  s.appendChild(stat("载荷原始长度", p.raw_delta_length + " B"));
+  s.appendChild(stat("输出上限", p.target_limit.toLocaleString() + " B"));
+  card.appendChild(s);
+  frag.appendChild(card);
+  frag.appendChild(renderWindows(p.windows));
+  frag.appendChild(renderInstructions(p.instructions));
+  return frag;
+}
+
+async function submit() {
+  const btn = $("submitBtn");
+  const result = $("result");
+  if (new Blob([deltaEl.value]).size > 131072 ||
+      new Blob([dictEl.value]).size > 65536) {
+    result.replaceChildren();
+    result.appendChild(renderError({
+      error: "粘贴内容超出长度上限，请先裁剪输入。", raw_offset: null
+    }));
+    return;
+  }
+  btn.disabled = true;
+  try {
+    const resp = await fetch("/api/decode", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({delta: deltaEl.value.trim(), dictionary: dictEl.value.trim()})
+    });
+    const p = await resp.json();
+    result.replaceChildren();
+    result.appendChild(p.ok ? renderOk(p) : renderError(p));
+  } catch (e) {
+    result.replaceChildren();
+    result.appendChild(renderError({error: "接口请求失败: " + e.message, raw_offset: null}));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("submitBtn").addEventListener("click", submit);
+$("clearBtn").addEventListener("click", () => {
+  deltaEl.value = ""; dictEl.value = "";
+  $("result").replaceChildren();
+  updateCounters();
+  deltaEl.focus();
+});
+updateCounters();
+</script>
+</body>
+</html>
